@@ -24,7 +24,7 @@ from tornado import websocket
 
 FORMAT = '%(asctime)-15s %(message)s'
 RATE = 40980.0 #unit: bytes
-BROADCAST = '%s%s%s%s%s%s' % (chr(0xff),chr(0xff),chr(0xff),chr(0xff),chr(0xff),chr(0xff))
+BROADCAST = f'{chr(255)}{chr(255)}{chr(255)}{chr(255)}{chr(255)}{chr(255)}'
 PING_INTERVAL = 30
 
 logger = logging.getLogger('relay')
@@ -57,14 +57,14 @@ class TunThread(threading.Thread):
         p = poll()
         p.register(self.tun, POLLIN)
         try:
-            while(self.running):
+            while self.running:
                 #TODO: log IP headers in the future
                 pollret = p.poll(1000)
                 for (f,e) in pollret:
                     if f == self.tun.fileno() and (e & POLLIN):
                         buf = self.tun.read(self.tun.mtu+18) #MTU doesn't include header or CRC32
                         if len(buf):
-                            mac = buf[0:6]
+                            mac = buf[:6]
                             if mac == BROADCAST or (ord(mac[0]) & 0x1) == 1:
                                 for socket in macmap.values():
                                     def send_message(socket):
@@ -93,7 +93,7 @@ class MainHandler(websocket.WebSocketHandler):
     def __init__(self, *args, **kwargs):
         super(MainHandler, self).__init__(*args,**kwargs)
         self.remote_ip = self.request.headers.get('X-Forwarded-For', self.request.remote_ip)
-        logger.info('%s: connected.' % self.remote_ip)
+        logger.info(f'{self.remote_ip}: connected.')
         self.thread = None
         self.mac = ''
         self.allowance = RATE #unit: messages
@@ -129,12 +129,12 @@ class MainHandler(websocket.WebSocketHandler):
                 del macmap[self.mac]
 
             self.mac = message[6:12]
-            formatted_mac = ':'.join('{0:02x}'.format(ord(a)) for a in message[6:12]) 
-            logger.info('%s: using mac %s' % (self.remote_ip, formatted_mac))
+            formatted_mac = ':'.join('{0:02x}'.format(ord(a)) for a in message[6:12])
+            logger.info(f'{self.remote_ip}: using mac {formatted_mac}')
 
             macmap[self.mac] = self
 
-        dest = message[0:6]
+        dest = message[:6]
         try:
             if dest == BROADCAST or (ord(dest[0]) & 0x1) == 1:
                 if self.upstream.do_throttle(message):
@@ -151,9 +151,8 @@ class MainHandler(websocket.WebSocketHandler):
                         macmap[dest].write_message(str(message),binary=True)
                     except:
                         pass
-            else:
-                if self.upstream.do_throttle(message):
-                    tunthread.write(message)
+            elif self.upstream.do_throttle(message):
+                tunthread.write(message)
 
         except:
             tb = traceback.format_exc()
@@ -164,7 +163,7 @@ class MainHandler(websocket.WebSocketHandler):
                 pass
 
     def on_close(self):
-        logger.info('%s: disconnected.' % self.remote_ip)
+        logger.info(f'{self.remote_ip}: disconnected.')
 
         if self.thread is not None:
             self.thread.running = False
